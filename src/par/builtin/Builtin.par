@@ -319,10 +319,14 @@ type Os.Command = iterative choice {
 	.env((Bytes) Bytes) => self,
 }
 
-type Os.Process = iterative box choice {
-	.id => Nat,
+type Os.Process = iterative choice {
+	.info => (Os.ProcessInfo) self,
 	.wait => Result<Os.Error, Option<Int>>,
 	.kill => Result<Os.Error, !>,
+}
+
+type Os.ProcessInfo = box choice {
+	.id => Nat,
 	.stdin => Option<Bytes.Writer<Os.Error>>,
 	.stdout => Option<Bytes.Reader<Os.Error>>,
 	.stderr => Option<Bytes.Reader<Os.Error>>,
