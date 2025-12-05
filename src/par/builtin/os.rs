@@ -579,7 +579,7 @@ async fn os_traverse_dir(mut handle: Handle) {
     }
 }
 
-async fn provide_envmap(mut handle: Handle) {
+async fn provide_envmap(handle: Handle) {
     handle.provide_box(async move |mut handle| {
         match handle.case().await.as_str() {
             "size" => {
@@ -625,7 +625,7 @@ async fn provide_envmap(mut handle: Handle) {
 async fn command_new(mut handle: Handle) {
    let name = handle.receive().bytes().await;
    let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
-   let mut cmd = std::process::Command::new(name_os);
+   let cmd = std::process::Command::new(name_os);
 
    provide_command(handle, cmd).await;
 }
