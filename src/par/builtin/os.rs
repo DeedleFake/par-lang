@@ -162,6 +162,14 @@ pub fn external_module() -> Module<std::sync::Arc<process::Expression<()>>> {
                 Type::name(Some("BoxMap"), "Readonly", vec![Type::bytes(), Type::bytes()]),
                 |handle| Box::pin(envmap_new(handle)),
             ),
+            Definition::external(
+                "Command",
+                Type::function(
+                    Type::name(Some("Bytes"), "Bytes", vec![]),
+                    Type::name(None, "Command", vec![]),
+                ),
+                |handle| Box::pin(command_new(handle)),
+            ),
         ],
     }
 }
@@ -572,47 +580,82 @@ async fn os_traverse_dir(mut handle: Handle) {
 }
 
 async fn envmap_new(mut handle: Handle) {
-    handle.provide_box(move |mut handle| {
-        async move {
-            match handle.case().await.as_str() {
-                "size" => {
-                    return handle.provide_nat(BigInt::from(std::env::vars_os().count()));
-                }
-                "keys" => {
-                    for (name, _) in std::env::vars_os() {
-                        handle.signal(literal!("item"));
-                        handle.send().provide_bytes(os_to_bytes(&name));
-                    }
-                    handle.signal(literal!("end"));
-                    return handle.break_();
-                }
-                "list" => {
-                    for (name, value) in std::env::vars_os() {
-                        handle.signal(literal!("item"));
-                        let mut pair = handle.send();
-                        pair.send().provide_bytes(os_to_bytes(&name));
-                        pair.provide_bytes(os_to_bytes(&value));
-                    }
-                    handle.signal(literal!("end"));
-                    return handle.break_();
-                }
-                "get" => {
-                    let name = handle.receive().bytes().await;
-                    let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
-                    match std::env::var_os(name_os) {
-                        Some(val) => {
-                            handle.signal(literal!("ok"));
-                            return handle.provide_bytes(os_to_bytes(&val));
-                        },
-                        None => {
-                            handle.signal(literal!("err"));
-                            return handle.break_();
-                        }
-                    }
-                }
-                _ => unreachable!(),
+    handle.provide_box(async move |mut handle| {
+        match handle.case().await.as_str() {
+            "size" => {
+                return handle.provide_nat(BigInt::from(std::env::vars_os().count()));
             }
+            "keys" => {
+                for (name, _) in std::env::vars_os() {
+                    handle.signal(literal!("item"));
+                    handle.send().provide_bytes(os_to_bytes(&name));
+                }
+                handle.signal(literal!("end"));
+                return handle.break_();
+            }
+            "list" => {
+                for (name, value) in std::env::vars_os() {
+                    handle.signal(literal!("item"));
+                    let mut pair = handle.send();
+                    pair.send().provide_bytes(os_to_bytes(&name));
+                    pair.provide_bytes(os_to_bytes(&value));
+                }
+                handle.signal(literal!("end"));
+                return handle.break_();
+            }
+            "get" => {
+                let name = handle.receive().bytes().await;
+                let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
+                match std::env::var_os(name_os) {
+                    Some(val) => {
+                        handle.signal(literal!("ok"));
+                        return handle.provide_bytes(os_to_bytes(&val));
+                    },
+                    None => {
+                        handle.signal(literal!("err"));
+                        return handle.break_();
+                    }
+                }
+            }
+            _ => unreachable!(),
         }
+    });
+}
+
+async fn command_new(mut handle: Handle) {
+   handle.provide_box(async move |mut handle| {
+       let name = handle.receive().bytes().await;
+       let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
+       let mut cmd = std::process::Command::new(name_os);
+
+       match handle.case().await.as_str() {
+           "output" => {
+               match cmd.output() {
+                   Ok(output) => {
+                       handle.signal(literal!("ok"));
+
+                       handle.send().provide_bytes(Bytes::from(output.stdout));
+                       handle.send().provide_bytes(Bytes::from(output.stderr));
+
+                       match output.status.code() {
+                           Some(code) => {
+                               handle.signal(literal!("ok"));
+                               return handle.provide_int(BigInt::from(code));
+                           }
+                           None => {
+                               handle.signal(literal!("err"));
+                               return handle.break_();
+                           }
+                       }
+                   }
+                   Err(err) => {
+                       handle.signal(literal!("err"));
+                       return handle.provide_string(ParString::from(err.to_string()));
+                   }
+               }
+           }
+           _ => unreachable!(),
+       }
     });
 }
 
