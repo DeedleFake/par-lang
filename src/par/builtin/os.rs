@@ -160,7 +160,7 @@ pub fn external_module() -> Module<std::sync::Arc<process::Expression<()>>> {
             Definition::external(
                 "Env",
                 Type::name(Some("BoxMap"), "Readonly", vec![Type::bytes(), Type::bytes()]),
-                |handle| Box::pin(envmap_new(handle)),
+                |handle| Box::pin(provide_envmap(handle)),
             ),
             Definition::external(
                 "Command",
@@ -579,7 +579,7 @@ async fn os_traverse_dir(mut handle: Handle) {
     }
 }
 
-async fn envmap_new(mut handle: Handle) {
+async fn provide_envmap(mut handle: Handle) {
     handle.provide_box(async move |mut handle| {
         match handle.case().await.as_str() {
             "size" => {
@@ -623,12 +623,16 @@ async fn envmap_new(mut handle: Handle) {
 }
 
 async fn command_new(mut handle: Handle) {
-   handle.provide_box(async move |mut handle| {
-       let name = handle.receive().bytes().await;
-       let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
-       let mut cmd = std::process::Command::new(name_os);
+   let name = handle.receive().bytes().await;
+   let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
+   let mut cmd = std::process::Command::new(name_os);
 
-       match handle.case().await.as_str() {
+   provide_command(handle, cmd).await;
+}
+
+async fn provide_command(mut handle: Handle, mut cmd: std::process::Command) {
+    loop {
+        match handle.case().await.as_str() {
            "output" => {
                match cmd.output() {
                    Ok(output) => {
@@ -654,9 +658,25 @@ async fn command_new(mut handle: Handle) {
                    }
                }
            }
+           "arg" => {
+               let arg = handle.receive().bytes().await;
+               let arg_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(arg.as_ref()) };
+
+               cmd.arg(arg_os);
+               continue;
+            }
+           "env" => {
+               let name = handle.receive().bytes().await;
+               let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
+               let val = handle.receive().bytes().await;
+               let val_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(val.as_ref()) };
+
+               cmd.env(name_os, val_os);
+               continue;
+            }
            _ => unreachable!(),
-       }
-    });
+        }
+    }
 }
 
 async fn pathbuf_from_os_path(mut handle: Handle) -> PathBuf {
