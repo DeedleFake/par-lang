@@ -754,8 +754,57 @@ fn provide_processinfo(handle: Handle, child: Arc<Mutex<std::process::Child>>) {
                 "id" => {
                     return handle.provide_nat(BigInt::from(child.lock().unwrap().id()));
                 }
+                "stdin" => {
+                    match child.lock().unwrap().stdin {
+                        Some(stdin) => {
+                            handle.signal(literal!("ok"));
+                            return provide_writer(handle, stdin).await;
+                        }
+                        None => {
+                            handle.signal(literal!("err"));
+                            return handle.break_();
+                        }
+                    }
+                }
                 _ => unreachable!(),
             }
         }
     });
+}
+
+async fn provide_writer<W: std::io::Write>(mut handle: Handle, mut w: W) {
+    loop {
+        match handle.case().await.as_str() {
+            "close" => {
+                handle.signal(literal!("ok"));
+                return handle.break_();
+            }
+            "flush" => {
+                match w.flush() {
+                    Ok(()) => {
+                        handle.signal(literal!("ok"));
+                        continue;
+                    }
+                    Err(err) => {
+                        handle.signal(literal!("err"));
+                        return handle.provide_string(ParString::from(err.to_string()));
+                    }
+                }
+            }
+            "write" => {
+                let data = handle.receive().bytes().await;
+                match w.write_all(data.as_ref()) {
+                    Ok(()) => {
+                        handle.signal(literal!("ok"));
+                        continue;
+                    }
+                    Err(err) => {
+                        handle.signal(literal!("err"));
+                        return handle.provide_string(ParString::from(err.to_string()));
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
 }
