@@ -292,8 +292,10 @@ type Os.Path = iterative@append recursive@parent box choice {
 
 dec Os.Path : [Bytes] Os.Path
 
-type Os.Command = iterative box choice {
+type Os.Command = iterative choice {
 	.output => Result<Os.Error, (Bytes, Bytes) Option<Int>>,
+	.arg(Bytes) => self,
+	.env((Bytes) Bytes) => self,
 }
 
 dec Os.Command : [Bytes] Os.Command
