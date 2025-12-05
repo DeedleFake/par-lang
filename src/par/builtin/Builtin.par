@@ -292,14 +292,6 @@ type Os.Path = iterative@append recursive@parent box choice {
 
 dec Os.Path : [Bytes] Os.Path
 
-type Os.Command = iterative choice {
-	.output => Result<Os.Error, (Bytes, Bytes) Option<Int>>,
-	.arg(Bytes) => self,
-	.env((Bytes) Bytes) => self,
-}
-
-dec Os.Command : [Bytes] Os.Command
-
 dec Os.Stdin  : Os.Reader
 dec Os.Stdout : Os.Writer
 dec Os.Stderr : Os.Writer
@@ -319,6 +311,24 @@ dec Os.TraverseDir : [Os.Path] Result<Os.Error, recursive either {
 }>
 
 dec Os.Env : BoxMap.Readonly<Bytes, Bytes>
+
+type Os.Command = iterative choice {
+	.output => Result<Os.Error, (Bytes, Bytes) Option<Int>>,
+	.spawn => Result<Os.Error, Os.Process>,
+	.arg(Bytes) => self,
+	.env((Bytes) Bytes) => self,
+}
+
+type Os.Process = iterative box choice {
+	.id => Nat,
+	.wait => Result<Os.Error, Option<Int>>,
+	.kill => Result<Os.Error, !>,
+	.stdin => Option<Bytes.Writer<Os.Error>>,
+	.stdout => Option<Bytes.Reader<Os.Error>>,
+	.stderr => Option<Bytes.Reader<Os.Error>>,
+}
+
+dec Os.Command : [Bytes] Os.Command
 
 /// Url
 

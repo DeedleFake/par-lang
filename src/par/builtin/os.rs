@@ -1,6 +1,7 @@
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use crate::{
@@ -579,6 +580,13 @@ async fn os_traverse_dir(mut handle: Handle) {
     }
 }
 
+async fn pathbuf_from_os_path(mut handle: Handle) -> PathBuf {
+    handle.signal(literal!("absolute"));
+    let path_bytes = handle.bytes().await;
+    let os_str = unsafe { OsStr::from_encoded_bytes_unchecked(&path_bytes) };
+    PathBuf::from(os_str)
+}
+
 async fn provide_envmap(handle: Handle) {
     handle.provide_box(async move |mut handle| {
         match handle.case().await.as_str() {
@@ -658,6 +666,18 @@ async fn provide_command(mut handle: Handle, mut cmd: std::process::Command) {
                    }
                }
            }
+           "spawn" => {
+               match cmd.spawn() {
+                   Ok(child) => {
+                       handle.signal(literal!("ok"));
+                       return provide_process(handle, child).await;
+                   }
+                   Err(err) => {
+                       handle.signal(literal!("err"));
+                       return handle.provide_string(ParString::from(err.to_string()));
+                    }
+               }
+           }
            "arg" => {
                let arg = handle.receive().bytes().await;
                let arg_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(arg.as_ref()) };
@@ -679,9 +699,35 @@ async fn provide_command(mut handle: Handle, mut cmd: std::process::Command) {
     }
 }
 
-async fn pathbuf_from_os_path(mut handle: Handle) -> PathBuf {
-    handle.signal(literal!("absolute"));
-    let path_bytes = handle.bytes().await;
-    let os_str = unsafe { OsStr::from_encoded_bytes_unchecked(&path_bytes) };
-    PathBuf::from(os_str)
+async fn provide_process(mut handle: Handle, child: std::process::Child) {
+    let child = Arc::new(Mutex::new(child));
+    handle.provide_box(move |mut handle| {
+        let child = child.clone();
+        async move {
+            match handle.case().await.as_str() {
+                "wait" => {
+                    match child.lock().unwrap().wait() {
+                        Ok(status) => {
+                            handle.signal(literal!("ok"));
+                            match status.code() {
+                                Some(code) => {
+                                    handle.signal(literal!("ok"));
+                                    return handle.provide_int(BigInt::from(code));
+                                }
+                                None => {
+                                    handle.signal(literal!("err"));
+                                    return handle.break_();
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            handle.signal(literal!("err"));
+                            return handle.provide_string(ParString::from(err.to_string()));
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    })
 }
